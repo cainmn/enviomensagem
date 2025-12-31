@@ -5,151 +5,230 @@
 <title>Envio COPART | WhatsApp</title>
 <link rel="icon" type="image/png" href="mensagem.png">
 
-
-<!-- Tailwind CSS -->
+<!-- Tailwind CSS (dev) -->
 <script src="https://cdn.tailwindcss.com"></script>
 
-<!-- PDF.js (para ler PDFs no navegador) -->
+<!-- PDF.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
-    body { background: #f2f6fa; }
-    .log-box {
-        height: 260px;
-        white-space: pre-line;
-    }
-</style>
-<style>
-/* animação modal: quando remover 'hidden' também adicionamos classes para animar */
-#modalEnviar .modal-open {
-  transform: translateY(0) scale(1);
-  opacity: 1;
-}
-/* o box começa com scale reduzido e opacidade 0; quando precisar abrir, JS adiciona a classe modal-open */
-#modalBox { transform: translateY(-8px) scale(0.95); opacity: 0; transition: transform 180ms ease, opacity 180ms ease; }
-#modalEnviar.show #modalBox { transform: translateY(0) scale(1); opacity: 1; }
-
-/* card selecionado */
-.modal-card { padding: 0.75rem; border-radius: 0.5rem; border: 1px solid #e5e7eb; cursor: pointer; background: #fff; }
-.modal-card:hover { box-shadow: 0 6px 18px rgba(15,23,42,0.06); }
-.modal-card.selected { background: #eef2ff; border-color: #c7d2fe; outline: 2px solid #6366f1; }
-
-
-#dropArea.dragover {
-    border-color: #3b82f6;
-    background-color: #f0f9ff;
+  html, body {
+  height: 100%;
 }
 
+body { background:#f2f6fa; }
 
+.log-box{
+  height:260px;
+  white-space:pre-line;
+}
+
+/* ABAS */
+.tab-btn{
+  padding:8px 14px;
+  border-radius:8px;
+  font-weight:600;
+  cursor:pointer;
+}
+.tab-btn.active{
+  background:#2563eb;
+  color:#fff;
+}
+
+/* DROP */
+#dropArea{
+  border:2px dashed #cbd5e1;
+}
+#dropArea.dragover{
+  border-color:#3b82f6;
+  background:#f0f9ff;
+}
+
+/* MODAL */
+#modalEnviar{
+  display:none;
+}
+#modalEnviar.show{
+  display:flex;
+}
+#modalBox{
+  transform:translateY(-8px) scale(.95);
+  opacity:0;
+  transition:all .2s ease;
+}
+#modalEnviar.show #modalBox{
+  transform:translateY(0) scale(1);
+  opacity:1;
+}
+
+.modal-card{
+  padding:.75rem;
+  border-radius:.5rem;
+  border:1px solid #e5e7eb;
+  cursor:pointer;
+  background:#fff;
+}
+.modal-card:hover{
+  box-shadow:0 6px 18px rgba(15,23,42,.06);
+}
+.modal-card.selected{
+  background:#eef2ff;
+  border-color:#c7d2fe;
+  outline:2px solid #6366f1;
+}
 </style>
-
-
 </head>
 
+<body class="min-h-screen bg-[#f2f6fa]">
 
-<body class="p-6">
 
-<div class="max-w-4xl mx-auto bg-white shadow-lg rounded-xl p-6">
+<div class="flex flex-col min-h-screen">
 
-    <h1 class="text-2xl font-bold text-blue-600 mb-4">
-        Auto Socorro Estrela – Envio Automático WhatsApp
-    </h1>
 
-    <!-- Seleção de PDFs -->
-    <div class="mb-4">
-        <label class="font-semibold">Selecionar PDFs:</label>
-        <input id="pdfInput" type="file" accept="application/pdf" multiple
-               class="block mt-2 border p-2 rounded w-full bg-gray-100">
+<nav class="bg-white shadow-md border-b px-6 h-16 flex items-center justify-between">
+  <h1 class="text-xl font-bold text-blue-600">
+    Controle CEGONHA
+  </h1>
+
+  <div class="flex gap-2">
+    <button class="tab-btn active" id="tabPrincipal">Principal</button>
+    <button class="tab-btn" id="tabTabelas">Tabela</button>
+  </div>
+</nav>
+
+
+  <!-- ================= ABA PRINCIPAL ================= -->
+<main class="flex-1 relative overflow-hidden">
+
+  <!-- ================= ABA PRINCIPAL ================= -->
+  <div id="aba-principal" class="absolute inset-0 overflow-auto p-6">
+
+    <label class="font-semibold">Selecionar PDFs:</label>
+    <input id="pdfInput" type="file" accept="application/pdf" multiple
+      class="block mt-2 border p-2 rounded w-full bg-gray-100">
+
+    <div id="dropArea"
+      class="mt-4 rounded-lg p-6 text-center cursor-pointer bg-white hover:bg-gray-50 transition">
+      <p class="text-gray-600 font-semibold">Arraste seus PDFs aqui</p>
+      <p class="text-gray-400 text-sm">ou use o seletor acima</p>
     </div>
 
-    <!-- Mensagem -->
-    <label class="font-semibold">Mensagem:</label>
-    <textarea id="mensagem" class="w-full p-3 border rounded bg-gray-100"
-              rows="5">
+    <label class="font-semibold mt-4 block">Mensagem:</label>
+    <textarea id="mensagem" rows="5"
+      class="w-full p-3 border rounded bg-gray-100 mt-1">
 *Isabela:*
 Olá, tudo bem?! Falo pela *Auto Socorro Estrela*, onde prestamos serviços para a Copart.
 Gostaria de saber a disponibilidade de coleta do veículo da placa *{placa}*.
-- Ele está liberado para coleta?
-- Tem alguma pendência financeira?
-- O veículo anda normalmente?
     </textarea>
-    <!-- Área de arrastar PDF -->
-<div id="dropArea"
-    class="mt-4 border-2 border-dashed border-gray-400 rounded-lg p-8 text-center cursor-pointer bg-white hover:bg-gray-50 transition">
-    
-    <p class="text-gray-600 text-lg font-semibold">Arraste seus PDFs aqui</p>
-    <p class="text-gray-400 text-sm">ou clique para selecionar</p>
 
-    <input id="pdfInput" type="file" class="hidden" accept="application/pdf" multiple>
-</div>
-
-
-    <!-- Botão -->
     <button id="btnProcessar"
-            class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg font-bold">
-        INICIAR PROCESSAMENTO
+      class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg font-bold">
+      INICIAR PROCESSAMENTO
     </button>
 
-    <!-- Barra de progresso -->
     <div class="w-full bg-gray-300 rounded-full h-3 mt-4">
-        <div id="progressBar" class="bg-blue-600 h-3 rounded-full" style="width: 0%"></div>
+      <div id="progressBar" class="bg-blue-600 h-3 rounded-full" style="width:0%"></div>
     </div>
 
-    <!-- LOG -->
     <h2 class="text-xl font-semibold mt-6 mb-2">LOG:</h2>
-    <div id="log" class="log-box bg-black text-green-400 p-3 rounded overflow-y-scroll font-mono text-sm"></div>
+    <div id="log"
+      class="log-box bg-black text-green-400 p-3 rounded overflow-y-scroll font-mono text-sm"></div>
 
-    <!-- DASHBOARD DE PRÉ-VISUALIZAÇÃO -->
-<div id="dashboard" class="mt-6 p-4 bg-white border rounded-lg shadow hidden">
+    <div id="dashboard"
+      class="mt-6 p-4 bg-white border rounded-lg shadow hidden">
+      <h2 class="text-xl font-bold mb-3">📊 Pré-visualização</h2>
+      <div id="dashboardContent" class="mb-4"></div>
 
-    <h2 class="text-xl font-bold mb-3">📊 Pré-visualização dos números</h2>
-
-    <div id="dashboardContent" class="text-gray-800 mb-4"></div>
-
-    <div class="flex gap-4">
+      <div class="flex gap-4">
         <button id="confirmarEnvio"
-            class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">
-            Confirmar Envio
+          class="bg-green-600 text-white px-4 py-2 rounded">
+          Confirmar Envio
         </button>
 
         <button id="cancelarEnvio"
-            class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">
-            Cancelar
+          class="bg-red-500 text-white px-4 py-2 rounded">
+          Cancelar
         </button>
-    </div>
-</div>
-<!-- Modal para envio de número -->
-<div id="modalEnviar" class="fixed inset-0 flex items-center justify-center bg-gray-700 bg-opacity-50 hidden z-50">
-  <div id="modalBox" class="bg-white rounded-lg shadow-lg w-11/12 max-w-2xl transform scale-90 opacity-0 transition-all duration-250">
-    <div class="p-4 border-b">
-      <div class="flex items-center justify-between">
-        <div>
-          <h3 id="modalTitle" class="text-lg font-bold">Enviar números</h3>
-          <p id="modalSubtitle" class="text-sm text-gray-500">PDF: <span id="modalPdfName"></span></p>
-        </div>
-        <div class="flex gap-2">
-          <button id="pularNumero" class="px-3 py-1 bg-yellow-500 text-white rounded">Pular número</button>
-          <button id="fecharModal" class="px-3 py-1 bg-red-500 text-white rounded">Fechar</button>
-        </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= ABA TABELAS ================= -->
+  <div id="aba-tabelas" class="absolute inset-0 hidden">
+    <iframe src="tabela.html" class="w-full h-full border-none"></iframe>
+  </div>
+
+</main>
+
+
+<!-- MODAL WHATSAPP -->
+<div id="modalEnviar"
+  class="fixed inset-0 flex items-center justify-center bg-gray-700 bg-opacity-50 z-50">
+
+  <div id="modalBox"
+    class="bg-white rounded-lg shadow-lg w-11/12 max-w-2xl">
+
+    <div class="p-4 border-b flex justify-between items-center">
+      <div>
+        <h3 class="text-lg font-bold">Enviar números</h3>
+        <p class="text-sm text-gray-500">
+          PDF: <span id="modalPdfName"></span>
+        </p>
+      </div>
+      <button id="fecharModal"
+        class="px-3 py-1 bg-red-500 text-white rounded">Fechar</button>
     </div>
 
     <div class="p-4">
-      <div id="modalInfo" class="mb-3 text-sm text-gray-600">Clique em um card para selecionar. Dê duplo-clique para enviar direto.</div>
-
-      <!-- Lista de cards -->
-      <div id="modalCards" class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-auto"></div>
+      <div id="modalCards"
+        class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-auto"></div>
 
       <div class="mt-4 flex justify-end gap-2">
-        <button id="enviarNumero" class="px-4 py-2 bg-green-600 text-white rounded font-bold">Enviar</button>
+        <button id="pularNumero"
+          class="px-3 py-1 bg-yellow-500 text-white rounded">Pular</button>
+        <button id="enviarNumero"
+          class="px-4 py-2 bg-green-600 text-white rounded font-bold">Enviar</button>
       </div>
     </div>
   </div>
 </div>
 
+<!-- SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://ggaogqlidtewfjnjpqdc.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdnYW9ncWxpZHRld2ZqbmpwcWRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyMzI0OTksImV4cCI6MjA4MTgwODQ5OX0.bq7jasYU9pLirU4IDRVbkvp25yddh1i08O_zaZxOX2o";
 
-</div>
+window.supabase = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_KEY
+);
+</script>
 
+<!-- CONTROLE DE ABAS -->
+<script>
+const tabPrincipal = document.getElementById("tabPrincipal");
+const tabTabelas = document.getElementById("tabTabelas");
+const abaPrincipal = document.getElementById("aba-principal");
+const abaTabelas = document.getElementById("aba-tabelas");
+
+tabPrincipal.onclick = () => {
+  abaPrincipal.classList.remove("hidden");
+  abaTabelas.classList.add("hidden");
+  tabPrincipal.classList.add("active");
+  tabTabelas.classList.remove("active");
+};
+
+tabTabelas.onclick = () => {
+  abaPrincipal.classList.add("hidden");
+  abaTabelas.classList.remove("hidden");
+  tabPrincipal.classList.remove("active");
+  tabTabelas.classList.add("active");
+};
+</script>
+
+<!-- APP -->
+ 
 <script src="app.js"></script>
 
 </body>
