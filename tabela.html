@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Tabelas de Coleta</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+  html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+
+.card{
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  padding:8px;
+  margin-bottom:8px;
+}
+.bg-pendente{ background:#FEE2E2; }
+.bg-liberado{ background:#FEF9C3; }
+.bg-coletado{ background:#DCFCE7; }
+.bg-carga{ background:#E0F2FE; border-color:#38BDF8; }
+
+.bg-atrasado{ border:2px solid #fca5a5; }
+.dropzone{
+  min-height:120px;
+  padding:10px;
+}
+
+.dropzone.dragover{
+  border-color:#2563eb;
+  background:#eff6ff;
+}
+.modal-bg{ background:rgba(0,0,0,.5); }
+.modal-bg{
+  position: fixed;
+  inset: 0;                 /* top:0 right:0 bottom:0 left:0 */
+  background: rgba(0,0,0,.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.hidden{
+  display: none;
+}
+
+
+.small-input{ font-size:12px; padding:4px; }
+</style>
+</head>
+
+<body class="bg-gray-100 h-full">
+
+
+
+<div class="flex h-full min-h-0">
+
+
+<!-- SIDEBAR -->
+<aside class="w-72 bg-white border-r p-4 overflow-y-auto">
+  <h3 class="font-bold mb-3">🔎 Filtros</h3>
+
+  <input id="fDestino" placeholder="Destino" class="border w-full mb-2 p-1 text-sm">
+  <input id="fOrigem" placeholder="Origem" class="border w-full mb-2 p-1 text-sm">
+  <input id="fInicio" type="date" class="border w-full mb-2 p-1 text-sm">
+  <input id="fFim" type="date" class="border w-full mb-4 p-1 text-sm">
+<hr class="my-4">
+
+<h3 class="font-bold mb-2">➕ Inserir veículo</h3>
+
+<input id="mPlaca" placeholder="Placa"
+  class="border w-full mb-2 p-1 text-sm uppercase">
+
+<input id="mModelo" placeholder="Modelo"
+  class="border w-full mb-2 p-1 text-sm">
+
+<input id="mOrigem" placeholder="Origem"
+  class="border w-full mb-2 p-1 text-sm">
+
+<input id="mDestino" placeholder="Destino"
+  class="border w-full mb-2 p-1 text-sm">
+
+<label class="text-xs text-gray-600">Data de entrega</label>
+<input id="mEntrega" type="date"
+  class="border w-full mb-3 p-1 text-sm">
+
+
+<button
+  onclick="inserirVeiculoManual()"
+  class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm font-semibold">
+  Salvar veículo
+</button>
+
+  <h3 class="font-bold mb-2">📤 Exportar</h3>
+  <select id="exportTipo" class="border w-full mb-2 p-1 text-sm">
+    <option value="coletar">À coletar</option>
+    <option value="coletado">Coletado</option>
+    <option value="carga">Carga</option>
+  </select>
+
+  <button onclick="exportarImagem()"
+    class="w-full bg-blue-600 text-white py-2 rounded">
+    Exportar imagem
+  </button>
+
+  <h3 class="font-bold mt-4 mb-2">📊 Valor por mês</h3>
+<div id="dashboardMes" class="text-sm text-gray-700 space-y-1">
+  Nenhum dado
+</div>
+
+</aside>
+
+<!-- MAIN -->
+<main class="flex-1 min-h-0 overflow-y-auto p-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div>
+      <h3 class="font-semibold text-yellow-600 mb-2">🚚 À coletar</h3>
+      <div id="coletar" class="dropzone"></div>
+    </div>
+
+    <div>
+      <h3 class="font-semibold text-green-600 mb-2">✅ Coletado</h3>
+      <div id="coletado" class="dropzone"></div>
+    </div>
+  </div>
+</main>
+
+</div>
+
+
+
+
+
+
+
+<!-- MODAL (FORA DO CONTAINER PRINCIPAL) -->
+<div id="modal" class="hidden modal-bg">
+  <div class="bg-white rounded-lg w-full max-w-lg p-4">
+    <div class="flex justify-between mb-2">
+      <h3 class="font-bold">Detalhes do Veículo</h3>
+      <button onclick="fecharModal()" class="text-red-500">Fechar</button>
+    </div>
+    <div id="modalContent" class="space-y-2 text-sm"></div>
+  </div>
+</div>
+<script>
+const SUPABASE_URL = "https://ggaogqlidtewfjnjpqdc.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdnYW9ncWxpZHRld2ZqbmpwcWRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyMzI0OTksImV4cCI6MjA4MTgwODQ5OX0.bq7jasYU9pLirU4IDRVbkvp25yddh1i08O_zaZxOX2o";
+
+const sb = supabase.createClient("https://ggaogqlidtewfjnjpqdc.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdnYW9ncWxpZHRld2ZqbmpwcWRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyMzI0OTksImV4cCI6MjA4MTgwODQ5OX0.bq7jasYU9pLirU4IDRVbkvp25yddh1i08O_zaZxOX2o");
+let VEICULOS = [];
+
+const coletar = document.getElementById("coletar");
+const coletado = document.getElementById("coletado");
+const modal = document.getElementById("modal");
+const modalContent = document.getElementById("modalContent");
+
+
+
+
+async function carregar(){
+  let q = sb.from("veiculos").select("*");
+
+  if(fDestino.value) q = q.ilike("destino", `%${fDestino.value}%`);
+  if(fOrigem.value) q = q.ilike("origem", `%${fOrigem.value}%`);
+  if(fInicio.value) q = q.gte("data_liberado", fInicio.value);
+  if(fFim.value) q = q.lte("data_liberado", fFim.value);
+
+  const { data } = await q;
+  VEICULOS = data || [];
+  render();
+}
+
+function formatarDataBR(data){
+  if(!data) return "";
+  if(data.includes("/")) return data;
+  const [ano, mes, dia] = data.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+
+function render(){
+  coletar.innerHTML = "";
+  coletado.innerHTML = "";
+
+  const hoje = new Date().toISOString().slice(0,10);
+
+  VEICULOS
+    .sort((a,b)=>{
+      const da = a.status==="coletar" ? a.data_liberado : a.entrega;
+      const db = b.status==="coletar" ? b.data_liberado : b.entrega;
+      if(!da) return 1;
+      if(!db) return -1;
+      return new Date(da)-new Date(db);
+    })
+    .forEach(v=>{
+      const atrasado =
+        v.status==="coletar" &&
+        v.data_liberado &&
+        v.data_liberado < hoje;
+
+      const avisoAtraso = atrasado
+  ? `<div class="text-xs text-red-600 font-semibold mt-1">⚠️ ATRASADO</div>`
+  : "";
+
+
+      const bg =
+        v.status==="coletado" && v.em_carga ? "bg-carga" :
+        v.status==="coletado" ? "bg-coletado" :
+        v.liberacao==="liberado" ? "bg-liberado" :
+        "bg-pendente";
+
+      const card = document.createElement("div");
+      card.className = `card ${bg} ${atrasado?"bg-atrasado":""}`;
+      card.draggable = v.liberacao==="liberado";
+      card.ondragstart = e => e.dataTransfer.setData("id",v.id);
+
+      card.innerHTML = `
+      <div class="flex justify-between items-start">
+  <div class="font-semibold">${v.placa} - ${v.modelo}</div>
+  <button
+    onclick="event.stopPropagation(); excluirVeiculo('${v.id}')"
+    class="text-gray-400 hover:text-red-600 text-sm font-bold">
+    ✕
+  </button>
+</div>
+
+       
+        <div class="text-xs">${v.origem} → ${v.destino}</div>
+
+        ${
+          v.status==="coletar" && v.data_liberado
+            ? `<div class="text-xs">📅 Coleta: ${formatarDataBR(v.data_liberado)}</div>`
+            : ""
+        }
+
+        ${
+          v.status==="coletado" && v.entrega
+            ? `<div class="text-xs">🚚 Entrega: ${formatarDataBR(v.entrega)}</div>`
+            : ""
+        }
+
+        ${
+          v.status==="coletado"
+            ? `<label class="text-xs flex items-center gap-2 mt-1">
+                 <input type="checkbox" ${v.em_carga?"checked":""}
+                   onclick="event.stopPropagation();toggleCarga('${v.id}',this.checked)">
+                 Carga
+               </label>`
+            : ""
+        }
+        
+        ${avisoAtraso}
+
+      `;
+
+      card.onclick = ()=>abrirModal(v.id);
+      (v.status==="coletado"?coletado:coletar).appendChild(card);
+    });
+
+
+    
+    atualizarDashboardMensal();
+
+
+}
+
+async function excluirVeiculo(id){
+  if(!confirm("Deseja realmente excluir este veículo?")) return;
+
+  const { error } = await sb.from("veiculos")
+    .delete()
+    .eq("id", id);
+
+  if(error){
+    alert("Erro ao excluir");
+    console.error(error);
+    return;
+  }
+
+  carregar();
+}
+
+
+function setupDrop(zone,status){
+  zone.ondragover=e=>e.preventDefault();
+  zone.ondrop=async e=>{
+    const id=e.dataTransfer.getData("id");
+    await sb.from("veiculos")
+      .update({ status })
+      .eq("id",id);
+    carregar();
+  };
+}
+setupDrop(coletar,"coletar");
+setupDrop(coletado,"coletado");
+
+function abrirModal(id){
+  const v = VEICULOS.find(x=>x.id===id);
+  modalContent.innerHTML = `
+    <div><b>Placa:</b> ${v.placa}</div>
+    <div><b>Modelo:</b> ${v.modelo}</div>
+    <div><b>Origem:</b> ${v.origem}</div>
+    <div><b>Destino:</b> ${v.destino}</div>
+
+    <label>Condição</label>
+    <select class="border w-full"
+      onchange="update('${id}','condicao',this.value)">
+      <option value="">Selecione</option>
+      <option value="anda" ${v.condicao==="anda"?"selected":""}>Anda</option>
+      <option value="nao_anda" ${v.condicao==="nao_anda"?"selected":""}>Não anda</option>
+      <option value="moto" ${v.condicao==="moto"?"selected":""}>Moto</option>
+    </select>
+
+    <label class="flex items-center gap-2 mt-2">
+  <input
+    type="checkbox"
+    ${v.liberacao === "liberado" ? "checked" : ""}
+    onchange="toggleLiberacao('${id}', this.checked)">
+  <span class="text-sm">Veículo liberado para coleta</span>
+</label>
+
+
+    <label>Data coleta</label>
+    <input type="date" class="border w-full"
+      value="${v.data_liberado||""}"
+      onchange="update('${id}','data_liberado',this.value)">
+
+      <label>Data entrega</label>
+<input
+  type="date"
+  class="border w-full"
+  value="${v.entrega || ""}"
+  onchange="update('${id}','entrega',this.value)">
+
+
+      <label>Valor (R$)</label>
+<input
+  type="number"
+  step="0.01"
+  class="border w-full small-input"
+  value="${v.valor || ""}"
+  onchange="update('${id}','valor',this.value)">
+
+
+      <label>Observação</label>
+<textarea
+  class="border w-full small-input"
+  rows="3"
+  placeholder="Observações do veículo"
+  onchange="update('${id}','observacao',this.value)"
+>${v.observacao || ""}</textarea>
+
+  `;
+  modal.classList.remove("hidden");
+}
+
+
+function fecharModal(){ modal.classList.add("hidden"); }
+
+async function update(id,campo,valor){
+  await sb.from("veiculos").update({[campo]:valor}).eq("id",id);
+  carregar();
+}
+
+async function toggleCarga(id,valor){
+  await sb.from("veiculos").update({ em_carga:valor }).eq("id",id);
+  carregar();
+}
+
+async function exportarImagem(){
+  const tipo = exportTipo.value;
+  let lista = VEICULOS.filter(v =>
+    tipo==="coletar" ? v.status==="coletar" :
+    tipo==="coletado" ? v.status==="coletado" :
+    v.status==="coletado" && v.em_carga
+  );
+
+  if(!lista.length) return alert("Nada para exportar");
+
+  const box = document.createElement("div");
+  box.style.padding="12px";
+  box.style.background="#fff";
+ box.innerHTML = lista.map(v=>`
+  <div style="border:1px solid #ddd;padding:8px;margin-bottom:6px">
+    <b>${v.placa}</b> - ${v.modelo}<br>
+    ${v.origem} → ${v.destino}<br>
+
+    ${
+      v.status==="coletar" && v.data_liberado
+        ? `📅 Coleta: ${formatarDataBR(v.data_liberado)}<br>`
+        : ""
+    }
+
+    ${
+      v.status==="coletado" && v.entrega
+        ? `🚚 Entrega: ${formatarDataBR(v.entrega)}<br>`
+        : ""
+    }
+
+    🚗 Condição: <b>${
+      v.condicao==="anda" ? "ANDA" :
+      v.condicao==="nao_anda" ? "NÃO ANDA" :
+      v.condicao==="moto" ? "MOTO" : "-"
+    }</b>
+
+    ${
+      v.observacao
+        ? `<br>📝 ${v.observacao}`
+        : ""
+    }
+  </div>
+`).join("");
+
+
+  document.body.appendChild(box);
+  const canvas = await html2canvas(box,{scale:2});
+  const a=document.createElement("a");
+  a.href=canvas.toDataURL();
+  a.download=`export_${tipo}.png`;
+  a.click();
+  document.body.removeChild(box);
+}
+
+[fDestino,fOrigem,fInicio,fFim].forEach(i=>i.addEventListener("input",carregar));
+carregar();
+
+
+
+function atualizarDashboardMensal(){
+  const mapa = {};
+
+  VEICULOS.forEach(v=>{
+    // ✅ SÓ CONTA SE ESTIVER COLETADO
+    if(v.status !== "coletado") return;
+    if(!v.valor) return;
+    if(!v.entrega) return;
+
+    const [ano, mes] = v.entrega.split("-");
+    const chave = `${mes}/${ano}`;
+
+    mapa[chave] = (mapa[chave] || 0) + Number(v.valor);
+  });
+
+  const box = document.getElementById("dashboardMes");
+
+  if(!Object.keys(mapa).length){
+    box.innerHTML = "Nenhum dado";
+    return;
+  }
+
+  box.innerHTML = Object.entries(mapa)
+    .sort(([a],[b])=>{
+      const [ma,aa]=a.split("/"), [mb,ab]=b.split("/");
+      return new Date(aa,ma-1) - new Date(ab,mb-1);
+    })
+    .map(([mes,total])=>`
+      <div>
+        ${mes}: <b>R$ ${total.toFixed(2)}</b>
+      </div>
+    `).join("");
+}
+
+async function toggleLiberacao(id, checked){
+  const valor = checked ? "liberado" : "pendente";
+
+  await sb
+    .from("veiculos")
+    .update({ liberacao: valor })
+    .eq("id", id);
+
+  carregar();
+}
+
+
+
+async function inserirVeiculoManual(){
+  let placa   = mPlaca.value.trim().toUpperCase();
+  let modelo  = mModelo.value.trim().toUpperCase();
+  let origem  = mOrigem.value.trim().toUpperCase();
+  let destino = mDestino.value.trim().toUpperCase();
+  const entrega = mEntrega.value || null;
+
+  // ===== VALIDAÇÕES =====
+  const placaRegex = /^[A-Z0-9]{7}$/;
+  if(!placaRegex.test(placa)){
+    alert("Placa inválida. Use exatamente 7 caracteres (ex: ABC1D23 ou ABC1234).");
+    return;
+  }
+
+  if(!modelo){
+    alert("Modelo é obrigatório.");
+    return;
+  }
+
+  if(!origem || !destino){
+    alert("Origem e Destino são obrigatórios.");
+    return;
+  }
+
+  const { error } = await sb
+    .from("veiculos")
+    .insert({
+      placa,
+      modelo,
+      origem,
+      destino,
+      entrega,
+      status: "coletar",      // ✅ À COLETAR
+      liberacao: "pendente"   // ✅ não liberado
+    });
+
+  if(error){
+    alert("Erro ao inserir veículo");
+    console.error(error);
+    return;
+  }
+
+  // Limpar campos
+  mPlaca.value = "";
+  mModelo.value = "";
+  mOrigem.value = "";
+  mDestino.value = "";
+  mEntrega.value = "";
+
+  carregar();
+}
+
+
+
+
+</script>
+
+</body>
+</html>
