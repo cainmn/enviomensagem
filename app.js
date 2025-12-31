@@ -1,334 +1,366 @@
 //-----------------------------------------
-// NÚMEROS BLOQUEADOS
+// PDF.JS WORKER
 //-----------------------------------------
-const numerosBloqueados = new Set([
-    "11945509645",
-    "11945272040",
-    "1136518801"
-]);
-function filtrarBloqueados(lista) {
-    return lista.filter(n => !numerosBloqueados.has(n.replace(/\D/g, "")));
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+//-----------------------------------------
+// COMUNICAÇÃO COM IFRAME (SEGURO)
+//-----------------------------------------
+function atualizarIframeTabela() {
+  const iframe = document.querySelector("#aba-tabelas iframe");
+  if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.postMessage("reloadTabela", "*");
+  }
 }
 
 //-----------------------------------------
-// LOG
+// VERIFICA SE PDF JÁ FOI PROCESSADO
+//-----------------------------------------
+async function pdfJaProcessado(nomePdf) {
+  try {
+    const { data, error } = await supabase
+      .from("veiculos")
+      .select("id")
+      .eq("pdf", nomePdf)
+      .limit(1);
+
+    if (error) throw error;
+    return data.length > 0;
+  } catch (err) {
+    console.warn("⚠️ Falha ao verificar PDF, permitindo importação:", err);
+    return false;
+  }
+}
+
+//-----------------------------------------
+// NÚMEROS BLOQUEADOS
+//-----------------------------------------
+const numerosBloqueados = new Set([
+  "11945509645",
+  "11945272040",
+  "1136518801"
+]);
+
+function filtrarBloqueados(lista) {
+  return lista.filter(n => !numerosBloqueados.has(n.replace(/\D/g, "")));
+}
+
+//-----------------------------------------
+// LOG VISUAL
 //-----------------------------------------
 function log(msg) {
-    const box = document.getElementById("log");
-    box.textContent += msg + "\n";
-    box.scrollTop = box.scrollHeight;
+  const box = document.getElementById("log");
+  if (!box) return;
+  box.textContent += msg + "\n";
+  box.scrollTop = box.scrollHeight;
 }
 
 //-----------------------------------------
 // UTILS
 //-----------------------------------------
 function normalizarNumero(n) {
-    n = n.replace(/\D/g, "");
-    if (!n.startsWith("55")) n = "55" + n;
-    return n;
+  n = n.replace(/\D/g, "");
+  if (!n.startsWith("55")) n = "55" + n;
+  return n;
 }
 
-async function extrairTextoPDF(file) {
-    return new Promise(async (resolve) => {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-        let texto = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            texto += content.items.map(t => t.str).join(" ") + "\n";
-        }
-        resolve(texto);
+//-----------------------------------------
+// PDF – EXTRAÇÃO POR POSIÇÃO
+//-----------------------------------------
+async function extrairItensPDF(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  let items = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+
+    content.items.forEach(it => {
+      items.push({
+        text: it.str.trim(),
+        x: it.transform[4],
+        y: it.transform[5]
+      });
     });
+  }
+  return items;
 }
 
+function extrairModeloPorPosicao(items) {
+  const label = items.find(i => i.text === "MODELO");
+  if (!label) return null;
+
+  const candidatos = items.filter(i =>
+    Math.abs(i.y - label.y) < 2 &&
+    i.x > label.x &&
+    i.text.length > 1 &&
+    !/FIPE|CHASSI|COR|ANO/i.test(i.text)
+  );
+
+  candidatos.sort((a, b) => a.x - b.x);
+  return candidatos[0]?.text || null;
+}
+
+function extrairCidadeOrigemPorPosicao(items) {
+  const label = items.find(i => i.text === "CIDADE");
+  if (!label) return null;
+
+  const candidatos = items.filter(i =>
+    Math.abs(i.y - label.y) < 2 &&
+    i.x > label.x &&
+    i.text.length > 2 &&
+    !/BAIRRO|ESTADO|CEP/i.test(i.text)
+  );
+
+  candidatos.sort((a, b) => a.x - b.x);
+  return candidatos[0]?.text || null;
+}
+
+//-----------------------------------------
+// REGEX AUXILIARES
+//-----------------------------------------
 function extrairTelefones(texto) {
-    const regex = /\(?\d{2}\)?\s?\d{4,5}[-\s]?\d{4}/g;
-    const encontrados = new Set();
-    (texto.match(regex) || []).forEach(t => {
-        const s = t.replace(/\D/g, "");
-        if (s.length >= 10 && s.length <= 12) encontrados.add(s);
-    });
-    return [...encontrados];
+  const regex = /\(?\d{2}\)?\s?\d{4,5}[-\s]?\d{4}/g;
+  const encontrados = new Set();
+
+  (texto.match(regex) || []).forEach(t => {
+    const s = t.replace(/\D/g, "");
+    if (s.length >= 10 && s.length <= 12) encontrados.add(s);
+  });
+
+  return [...encontrados];
 }
 
 function extrairPlacas(texto) {
-    const regex = /\b([A-Z]{3}\-?\d{4}|[A-Z]{3}\d[A-Z]\d{2})\b/gi;
-    const placas = [...(texto.match(regex) || [])]
-        .map(p => p.replace(/[^A-Za-z0-9]/g, "").toUpperCase());
-    return placas;
+  const regex = /\b([A-Z]{3}\d[A-Z0-9]\d{2}|[A-Z]{3}\d{4})\b/gi;
+  return [...(texto.match(regex) || [])]
+    .map(p => p.replace(/[^A-Za-z0-9]/g, "").toUpperCase());
 }
+
 //-----------------------------------------
-// DRAG & DROP PARA PDFs
+// DRAG & DROP (PDFs)
 //-----------------------------------------
 const dropArea = document.getElementById("dropArea");
 const pdfInput = document.getElementById("pdfInput");
 
-dropArea.addEventListener("click", () => pdfInput.click());
+if (dropArea && pdfInput) {
+  dropArea.onclick = () => pdfInput.click();
 
-dropArea.addEventListener("dragover", (e) => {
+  dropArea.ondragover = e => {
     e.preventDefault();
     dropArea.classList.add("dragover");
-});
+  };
 
-dropArea.addEventListener("dragleave", () => {
-    dropArea.classList.remove("dragover");
-});
+  dropArea.ondragleave = () => dropArea.classList.remove("dragover");
 
-dropArea.addEventListener("drop", (e) => {
+  dropArea.ondrop = e => {
     e.preventDefault();
     dropArea.classList.remove("dragover");
-
-    const arquivos = e.dataTransfer.files;
-
-    if (arquivos.length > 0) {
-        // injeta os arquivos arrastados no input
-        pdfInput.files = arquivos;
-        log(`📁 ${arquivos.length} arquivo(s) adicionado(s) por arrastar.`);
-    }
-});
-
-//-----------------------------------------
-// VARIÁVEIS GLOBAIS
-//-----------------------------------------
-let whatsappWindow = null; // referência para reutilizar a mesma aba/janela do WhatsApp
-function openWhatsAppTab(url) {
-    try {
-        // abre ou reutiliza uma aba com o nome 'whatsappWindow' (mesma aba reaproveitada)
-        if (!whatsappWindow || whatsappWindow.closed) {
-            whatsappWindow = window.open(url, "whatsappWindow");
-        } else {
-            // atualiza a aba existente
-            whatsappWindow.location.href = url;
-            whatsappWindow.focus();
-        }
-    } catch (e) {
-        // fallback
-        whatsappWindow = window.open(url, "whatsappWindow");
-    }
+    pdfInput.files = e.dataTransfer.files;
+    log(`📁 ${pdfInput.files.length} arquivo(s) adicionados`);
+  };
 }
 
 //-----------------------------------------
-// BOTÃO PROCESSAR PDFs
+// WHATSAPP
+//-----------------------------------------
+let whatsappWindow = null;
+
+function openWhatsAppTab(url) {
+  if (!whatsappWindow || whatsappWindow.closed) {
+    whatsappWindow = window.open(url, "whatsappWindow");
+  } else {
+    whatsappWindow.location.href = url;
+    whatsappWindow.focus();
+  }
+}
+
+//-----------------------------------------
+// PROCESSAR PDFs
 //-----------------------------------------
 document.getElementById("btnProcessar").onclick = async () => {
-    log("=== Iniciando leitura dos PDFs ===");
+  log("=== Iniciando leitura dos PDFs ===");
 
-    const arquivos = document.getElementById("pdfInput").files;
-    if (arquivos.length === 0) return alert("Selecione PDFs!");
+  const arquivos = pdfInput.files;
+  if (!arquivos.length) {
+    alert("Selecione PDFs!");
+    return;
+  }
 
-    let dadosPreview = [];
+  let preview = [];
 
-    for (let file of arquivos) {
-        const texto = await extrairTextoPDF(file);
-        let nums = extrairTelefones(texto);
-        let originais = [...nums];
-        nums = filtrarBloqueados(nums);
-        const placas = extrairPlacas(texto);
+  for (let file of arquivos) {
 
-        dadosPreview.push({
-            nome: file.name,
-            telefones: nums,
-            bloqueados: originais.filter(n => !nums.includes(n)),
-            placas
-        });
+    if (await pdfJaProcessado(file.name)) {
+      log(`⚠️ PDF ignorado (já importado): ${file.name}`);
+      continue;
     }
 
-    mostrarDashboard(dadosPreview);
+    log(`📄 Processando ${file.name}`);
+
+    const items = await extrairItensPDF(file);
+    const textoPlano = items.map(i => i.text).join(" ");
+
+    const placas = extrairPlacas(textoPlano);
+    if (!placas.length) {
+      log(`⚠️ Nenhuma placa encontrada em ${file.name}`);
+      continue;
+    }
+
+    const telefones = filtrarBloqueados(extrairTelefones(textoPlano));
+    const modelo = extrairModeloPorPosicao(items) || "Não informado";
+    const origem = extrairCidadeOrigemPorPosicao(items) || "Não informada";
+
+    const destino =
+      textoPlano.match(/\b(Itaquaquecetuba|Pirapora|Porto Seguro)\s*-?\s*[A-Z]{2}/i)?.[0] ||
+      "Não informado";
+
+    const entregaRaw =
+      textoPlano.match(/DATA LIMITE ENTREGA\s+(\d{2}\/\d{2}\/\d{4})/i)?.[1] ||
+      textoPlano.match(/\b\d{2}\/\d{2}\/\d{4}\b(?!.*\b\d{2}\/\d{2}\/\d{4}\b)/)?.[0] ||
+      null;
+
+    const entrega = entregaRaw
+      ? entregaRaw.split("/").reverse().join("-")
+      : null;
+
+    for (let placa of placas) {
+      const { error } = await supabase
+        .from("veiculos")
+        .insert({
+          placa,
+          modelo,
+          origem,
+          destino,
+          entrega,
+          pdf: file.name,
+          status: "coletar",
+          liberacao: "pendente"
+        });
+
+      if (error) {
+        console.error("Erro ao salvar veículo:", error);
+        log(`❌ Erro ao salvar ${placa}`);
+      } else {
+        log(`✅ Veículo ${placa} salvo`);
+      }
+    }
+
+    preview.push({
+      nome: file.name,
+      placas,
+      telefones
+    });
+  }
+
+  atualizarIframeTabela();
+  mostrarDashboard(preview);
 };
 
 //-----------------------------------------
-// DASHBOARD
+// DASHBOARD (PRÉ-VISUALIZAÇÃO)
 //-----------------------------------------
 function mostrarDashboard(dados) {
-    const dash = document.getElementById("dashboard");
-    const content = document.getElementById("dashboardContent");
+  const dash = document.getElementById("dashboard");
+  const content = document.getElementById("dashboardContent");
 
-    dash.classList.remove("hidden");
+  dash.classList.remove("hidden");
 
-    let html = "";
+  content.innerHTML = dados.map((pdf, i) => `
+    <div class="border-b mb-3 pb-2">
+      <strong>${i + 1}. ${pdf.nome}</strong><br>
+      Placas: ${pdf.placas.join(", ") || "Nenhuma"}<br>
+      Telefones: ${pdf.telefones.join(", ") || "Nenhum"}
+    </div>
+  `).join("");
 
-    dados.forEach((pdf, idx) => {
-        html += `
-            <div class="mb-4 border-b pb-2">
-                <h3 class="font-bold text-lg text-blue-600">${idx + 1}. ${pdf.nome}</h3>
-                <p><strong>Placas detectadas:</strong> ${pdf.placas.length ? pdf.placas.join(", ") : "Nenhuma"}</p>
-                <p><strong>Números válidos:</strong> ${pdf.telefones.length ? pdf.telefones.join(", ") : "Nenhum"}</p>
-                <p class="text-red-600"><strong>Números bloqueados:</strong> ${pdf.bloqueados.length ? pdf.bloqueados.join(", ") : "Nenhum"}</p>
-            </div>
-        `;
-    });
+  document.getElementById("confirmarEnvio").onclick =
+    () => iniciarEnvio(dados);
 
-    content.innerHTML = html;
-
-    document.getElementById("confirmarEnvio").onclick = () => iniciarEnvio(dados);
-    document.getElementById("cancelarEnvio").onclick = () => {
-        dash.classList.add("hidden");
-        log("❌ Envio cancelado.");
-    };
+  document.getElementById("cancelarEnvio").onclick = () => {
+    dash.classList.add("hidden");
+    log("❌ Envio cancelado.");
+  };
 }
 
 //-----------------------------------------
-// INICIAR ENVIO — percorre PDFs e aguarda modal por PDF
+// ENVIO WHATSAPP
 //-----------------------------------------
 async function iniciarEnvio(preview) {
-    log("=== Iniciando envio das mensagens ===");
+  const msgBase = document.getElementById("mensagem").value;
+  const progressBar = document.getElementById("progressBar");
 
-    const msgBase = document.getElementById("mensagem").value;
-    const progressBar = document.getElementById("progressBar");
+  let total = preview.length;
+  let atual = 0;
 
-    let totalArquivos = preview.length;
-    let atual = 0;
+  for (let pdf of preview) {
+    atual++;
+    progressBar.style.width = `${(atual / total) * 100}%`;
 
-    for (let pdf of preview) {
-        atual++;
-        progressBar.style.width = `${(atual / totalArquivos) * 100}%`;
+    if (!pdf.telefones.length || !pdf.placas.length) continue;
 
-        log(`📄 Processando: ${pdf.nome}`);
+    const placa = pdf.placas[0];
+    const mensagem = encodeURIComponent(
+      msgBase.replace("{placa}", placa)
+    );
 
-        if (pdf.telefones.length === 0) {
-            log("❌ Nenhum telefone válido.\n");
-            continue;
-        }
+    await mostrarModalEnviar(pdf.nome, pdf.telefones.slice(), mensagem);
+  }
 
-        if (pdf.placas.length === 0) {
-            log("❌ Nenhuma placa detectada.\n");
-            continue;
-        }
-
-        const placa = pdf.placas[0];
-        const mensagem = encodeURIComponent(msgBase.replace("{placa}", placa));
-
-        // mostra modal com nome do PDF e fila de telefones; aguarda até esvaziar ou usuário fechar
-        await mostrarModalEnviar(pdf.nome, pdf.telefones.slice(), mensagem);
-
-        log("-----------------------------------------------------\n");
-    }
-
-    log("🎉 PROCESSO CONCLUÍDO!");
+  log("🎉 PROCESSO CONCLUÍDO!");
 }
 
 //-----------------------------------------
-// MODAL: mostra números e permite enviar um-a-um
-// - mostra o nome do PDF atual
-// - cards clicáveis (seleciona)
-// - duplo clique no card envia direto
-// - botao 'Pular número' remove sem enviar
-// - envia usando mesma aba do WhatsApp (reuso de aba)
+// MODAL WHATSAPP
 //-----------------------------------------
 function mostrarModalEnviar(pdfName, telefones, mensagem) {
-    return new Promise((resolve) => {
-        const modal = document.getElementById("modalEnviar");
-        const modalBox = document.getElementById("modalBox");
-        const title = document.getElementById("modalTitle");
-        const subtitle = document.getElementById("modalPdfName");
-        const cardsContainer = document.getElementById("modalCards");
-        const enviarBtn = document.getElementById("enviarNumero");
-        const pularBtn = document.getElementById("pularNumero");
-        const fecharBtn = document.getElementById("fecharModal");
-        const info = document.getElementById("modalInfo");
+  return new Promise(resolve => {
+    const modal = document.getElementById("modalEnviar");
+    const cards = document.getElementById("modalCards");
+    const enviarBtn = document.getElementById("enviarNumero");
+    const pularBtn = document.getElementById("pularNumero");
+    const fecharBtn = document.getElementById("fecharModal");
 
-        // estado local da fila e seleção
-        const fila = Array.from(telefones);
-        let selectedIndex = 0;
+    let fila = [...telefones];
+    let idx = 0;
 
-        title.textContent = "Enviar números";
-        subtitle.textContent = pdfName;
-        info.textContent = "Clique em um card para selecionar. Dê duplo-clique para enviar direto.";
+    document.getElementById("modalPdfName").textContent = pdfName;
+    modal.classList.add("show");
 
-        function renderCards() {
-            cardsContainer.innerHTML = "";
-            if (fila.length === 0) {
-                cardsContainer.innerHTML = `<div class="text-gray-600">Nenhum número restante.</div>`;
-                enviarBtn.disabled = true;
-                pularBtn.disabled = true;
-                return;
-            }
-            enviarBtn.disabled = false;
-            pularBtn.disabled = false;
+    function render() {
+      cards.innerHTML = "";
+      fila.forEach((n, i) => {
+        const d = document.createElement("div");
+        d.className = "modal-card" + (i === idx ? " selected" : "");
+        d.textContent = n;
+        d.onclick = () => { idx = i; render(); };
+        d.ondblclick = () => enviar();
+        cards.appendChild(d);
+      });
+    }
 
-            fila.forEach((num, idx) => {
-                const card = document.createElement("div");
-                card.className = "modal-card";
-                if (idx === selectedIndex) card.classList.add("selected");
-                card.innerHTML = `
-                    <div class="text-sm text-gray-500">${idx + 1}/${fila.length}</div>
-                    <div class="text-base font-medium">${num}</div>
-                `;
-                // clique seleciona
-                card.addEventListener("click", () => {
-                    selectedIndex = idx;
-                    renderCards();
-                });
-                // duplo clique envia direto esse número
-                card.addEventListener("dblclick", async () => {
-                    const numeroEscolhido = fila.splice(idx, 1)[0];
-                    if (selectedIndex >= fila.length) selectedIndex = Math.max(0, fila.length - 1);
-                    await enviarNumero(numeroEscolhido, mensagem);
-                    renderCards();
-                    // se acabou, resolve
-                    if (fila.length === 0) {
-                        closeModal();
-                        resolve();
-                    }
-                });
-                cardsContainer.appendChild(card);
-            });
-        }
+    async function enviar() {
+      const num = fila.splice(idx, 1)[0];
+      if (!num) return;
+      const url = `https://web.whatsapp.com/send?phone=${normalizarNumero(num)}&text=${mensagem}`;
+      openWhatsAppTab(url);
+      render();
+      if (!fila.length) fechar();
+    }
 
-        async function enviarNumero(numero, mensagemEnc) {
-            const destino = normalizarNumero(numero);
-            const url = `https://web.whatsapp.com/send?phone=${destino}&text=${mensagemEnc}`;
-            openWhatsAppTab(url);
-            log(`✔️ Enviado para ${destino}`);
-            // dá um pequeno delay para dar tempo da aba carregar caso queira (não obrigatório)
-            await new Promise(r => setTimeout(r, 300));
-        }
+    function fechar() {
+      modal.classList.remove("show");
+      resolve();
+    }
 
-        // enviar botão: envia o selecionado
-        enviarBtn.onclick = async () => {
-            if (fila.length === 0) return;
-            const num = fila.splice(selectedIndex, 1)[0];
-            if (selectedIndex >= fila.length) selectedIndex = Math.max(0, fila.length - 1);
-            await enviarNumero(num, mensagem);
-            renderCards();
-            if (fila.length === 0) {
-                closeModal();
-                resolve();
-            }
-        };
+    enviarBtn.onclick = enviar;
+    pularBtn.onclick = () => { fila.splice(idx, 1); render(); };
+    fecharBtn.onclick = fechar;
 
-        // pular botão: remove selecionado sem enviar
-        pularBtn.onclick = () => {
-            if (fila.length === 0) return;
-            const skipped = fila.splice(selectedIndex, 1)[0];
-            log(`⏭️ Pulou ${normalizarNumero(skipped)}`);
-            if (selectedIndex >= fila.length) selectedIndex = Math.max(0, fila.length - 1);
-            renderCards();
-            if (fila.length === 0) {
-                closeModal();
-                resolve();
-            }
-        };
-
-        // fechar modal (cancelar) -> resolve para continuar fluxo (vai para próximo PDF)
-        fecharBtn.onclick = () => {
-            log("❌ Modal fechado — prosseguindo para o próximo PDF.");
-            closeModal();
-            resolve();
-        };
-
-        function closeModal() {
-            modal.classList.add("hidden");
-            modal.classList.remove("show");
-        }
-
-        // abrir modal com animação
-        modal.classList.remove("hidden");
-        // permitir transição: adiciona classe 'show' que ativa styles em CSS
-        setTimeout(() => modal.classList.add("show"), 10);
-
-        // renderiza
-        renderCards();
-    });
+    render();
+  });
 }
+
+
