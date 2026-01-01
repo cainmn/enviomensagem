@@ -87,12 +87,13 @@ body { background:#f2f6fa; }
 
 <nav class="bg-white shadow-md border-b px-6 h-16 flex items-center justify-between">
   <h1 class="text-xl font-bold text-blue-600">
-    Controle CEGONHA
+    Controle - CEGONHA
   </h1>
 
   <div class="flex gap-2">
     <button class="tab-btn active" id="tabPrincipal">Principal</button>
     <button class="tab-btn" id="tabTabelas">Tabela</button>
+    <button class="tab-btn" id="tabPainel">Painel</button>
   </div>
 </nav>
 
@@ -114,14 +115,11 @@ body { background:#f2f6fa; }
     </div>
 
     <label class="font-semibold mt-4 block">Mensagem:</label>
-   <textarea id="mensagem" class="w-full p-3 border rounded bg-gray-100"
-              rows="5">
+    <textarea id="mensagem" rows="5"
+      class="w-full p-3 border rounded bg-gray-100 mt-1">
 *Isabela:*
 Olá, tudo bem?! Falo pela *Auto Socorro Estrela*, onde prestamos serviços para a Copart.
 Gostaria de saber a disponibilidade de coleta do veículo da placa *{placa}*.
-- Ele está liberado para coleta?
-- Tem alguma pendência financeira?
-- O veículo anda normalmente?
     </textarea>
 
     <button id="btnProcessar"
@@ -229,6 +227,17 @@ tabTabelas.onclick = () => {
   tabTabelas.classList.add("active");
 };
 </script>
+<script>
+const tabPainel = document.getElementById("tabPainel");
+
+tabPainel.onclick = () => {
+  window.open(
+    "https://cainmn.github.io/escala-folgas/",
+    "_blank"
+  );
+};
+</script>
+
 
 <!-- APP -->
  
@@ -236,4 +245,3 @@ tabTabelas.onclick = () => {
 
 </body>
 </html>
-
